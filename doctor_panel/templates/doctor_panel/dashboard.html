@@ -1,0 +1,190 @@
+{% extends 'doctor_panel/base.html' %}
+
+{% block title %}Dashboard - Painel da Médica{% endblock %}
+
+{% block extra_styles %}
+    <style>
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        
+        .dashboard-header h2 {
+            font-size: 1.8rem;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="dashboard-header">
+        <h2>Agendamentos</h2>
+    </div>
+    
+    <!-- Statistics -->
+    <div class="stats">
+        <div class="stat-card">
+            <h3>Pendentes</h3>
+            <div class="number" id="stat-requested">-</div>
+        </div>
+        <div class="stat-card">
+            <h3>Confirmados</h3>
+            <div class="number" id="stat-confirmed">-</div>
+        </div>
+        <div class="stat-card">
+            <h3>Cancelados</h3>
+            <div class="number" id="stat-cancelled">-</div>
+        </div>
+        <div class="stat-card">
+            <h3>Hoje</h3>
+            <div class="number" id="stat-today">-</div>
+        </div>
+    </div>
+    
+    <!-- Filters -->
+    <div class="filters">
+        <label for="status-filter">Filtrar por status:</label>
+        <select id="status-filter" onchange="filterByStatus(this.value)">
+            <option value="requested" {% if status_filter == 'requested' %}selected{% endif %}>Pendentes</option>
+            <option value="confirmed" {% if status_filter == 'confirmed' %}selected{% endif %}>Confirmados</option>
+            <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>Cancelados</option>
+            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>Todos</option>
+        </select>
+    </div>
+    
+    <!-- Appointments Table -->
+    <table>
+        <thead>
+            <tr>
+                <th>Paciente</th>
+                <th>Email</th>
+                <th>Data e Hora</th>
+                <th>Status</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for appt in appointments %}
+            <tr id="appt-row-{{ appt.id }}">
+                <td>{{ appt.patient.first_name|default:appt.patient.username }}</td>
+                <td>{{ appt.patient.email }}</td>
+                <td>{{ appt.scheduled_time|date:"d/m/Y H:i" }}</td>
+                <td>
+                    <span class="status {{ appt.status }}" id="status-{{ appt.id }}">
+                        {% if appt.status == 'requested' %}Pendente
+                        {% elif appt.status == 'confirmed' %}Confirmado
+                        {% else %}Cancelado{% endif %}
+                    </span>
+                </td>
+                <td>
+                    <div class="actions">
+                        {% if appt.status == 'requested' %}
+                            <button class="btn-confirm" onclick="confirmAppointment({{ appt.id }})">Confirmar</button>
+                            <button class="btn-reject" onclick="rejectAppointment({{ appt.id }})">Recusar</button>
+                        {% else %}
+                            <span style="color: #999;">-</span>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" style="text-align: center; color: #999;">Nenhum agendamento encontrado</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <script>
+        // Load statistics on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStatistics();
+        });
+        
+        function loadStatistics() {
+            fetch('{% url "doctor_panel:statistics" %}')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('stat-requested').textContent = data.total_requested;
+                    document.getElementById('stat-confirmed').textContent = data.total_confirmed;
+                    document.getElementById('stat-cancelled').textContent = data.total_cancelled;
+                    document.getElementById('stat-today').textContent = data.today_appointments;
+                });
+        }
+        
+        function confirmAppointment(appointmentId) {
+            if (!confirm('Confirmar este agendamento?')) return;
+            
+            fetch(`{% url "doctor_panel:confirm" 0 %}`.replace('0', appointmentId), {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'confirmed') {
+                    updateAppointmentRow(appointmentId, 'confirmed');
+                    loadStatistics();
+                    alert('Agendamento confirmado!');
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+        
+        function rejectAppointment(appointmentId) {
+            if (!confirm('Rejeitar este agendamento?')) return;
+            
+            fetch(`{% url "doctor_panel:reject" 0 %}`.replace('0', appointmentId), {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'cancelled') {
+                    updateAppointmentRow(appointmentId, 'cancelled');
+                    loadStatistics();
+                    alert('Agendamento cancelado!');
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+        
+        function updateAppointmentRow(appointmentId, status) {
+            const row = document.getElementById(`appt-row-${appointmentId}`);
+            const statusEl = document.getElementById(`status-${appointmentId}`);
+            const statusText = status === 'confirmed' ? 'Confirmado' : 'Cancelado';
+            
+            statusEl.textContent = statusText;
+            statusEl.className = `status ${status}`;
+            
+            // Remove actions
+            const actionsCell = row.querySelector('.actions');
+            actionsCell.innerHTML = '<span style="color: #999;">-</span>';
+        }
+        
+        function filterByStatus(status) {
+            window.location.search = `?status=${status}`;
+        }
+        
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    </script>
+{% endblock %}
